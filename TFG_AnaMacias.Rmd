@@ -1,0 +1,1237 @@
+---
+title: "TFGcodigofinal"
+author: "Ana Macías Rodríguez"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE, message = FALSE)
+```
+
+# PAQUETES
+
+```{r}
+# Packages
+library("permute")
+library("lattice")
+library("corpcor")
+library("mvtnorm")
+library("ICS")
+library("cluster")
+library("vegan")
+library("MASS")
+library("cluster")
+library("clusterSim")
+library("NbClust")
+library("factoextra")
+library("colorspace")
+library("ggplot2")
+library("biotools")
+library("MVN")
+library("Hotelling")
+library("ICSNP")
+library("caTools")
+library("car")
+library("quantmod")
+library("MASS")
+library("corrplot")
+```
+
+# Preparación de la Base de Datos
+
+```{r}
+# Lectura de los datos 
+library(haven)
+dataset=read_sav("~/UC3M/4º/TFG/CIS - Barómetro/Fichero_Datos/3347.SAV")
+```
+
+SELECCIÓN DE VARIABLES
+
+```{r}
+# Selección de variables a analizar 
+
+a<-dataset[,c("CCAA","SEXO","EDAD","P1","P2","P3","P4","P5","P6","P7","ECOESP","ECOPER","CONFIANZAPTE","CONFIANZAOPOSIC","IA_VALIDA","IA_MODIFICADA")]
+write.csv(a, "Data.csv")
+Data<-read.csv("Data.csv")
+```
+
+En primer lugar vamos a analizar las últimas dos variables IA_VALIDA e IA_MODIFICADO para limpiar la base de datos de aquellas entrevistas que no sirvan.
+
+Ambas variables son binarias y toman 0 para no y 1 para si.
+
+```{r}
+# ¿Está la entrevista modificada?
+modificada<-sum(Data$IA_MODIFICADA==1)
+if (modificada==0){
+  print("No hay entrevistas modificadas")}else {print("Hay", modificada, "entrevistas modificadas")}
+
+# ¿Es la entrevista válida?
+novalida<-sum(Data$IA_VALIDA==0)
+if (novalida==0){print("Todas las entrevistas son válidas")}else{print("El número de entrevistas no válidas es:")
+  print(novalida)}
+```
+
+Hay 174 entrevistas no válidas por diversas razones las cuales no son significantes para el problema de investigación, por lo que nos desharemos de ellas.
+
+```{r}
+elim_filas<-c()
+for (i in 1:nrow(Data)){
+  if (Data[i,"IA_VALIDA"]==0)
+  {
+    elim_filas<-c(elim_filas,i)
+  }
+}
+
+data2<-Data[-elim_filas,]
+
+#Comprobacion de que no quedan datos no validos
+novalida<-sum(data2$IA_VALIDA==0)
+if (novalida==0){print("Todas las entrevistas son válidas")}else{print("El número de entrevistas no válidas es:")
+  print(novalida)}
+
+# Actualizamos el índice marcado por la variable X
+data2$X<-c(1:nrow(data2))
+row.names(data2)<-data2$X
+```
+
+Ahora podemos eliminar las dos últimas columnas y nos quedaremos con las variables de real interés.
+
+```{r}
+#Datos finales
+Datos<-data2[,-c(1,16,17)]
+#sustiuir missing values por ceros
+Datos[is.na(Datos)] <- 0
+#Guardamos datos finales
+write.csv(Datos, "DatosFinales.csv")
+Datos<-read.csv("DatosFinales.csv")
+head(Datos)
+knitr::kable(head(Datos))
+```
+
+# Leemos los datos limpios
+
+```{r}
+# 24 Variables
+Datos<-read.csv("DatosFinales.csv")
+head(Datos)
+Datos<-Datos[,-1]
+dim(Datos)
+View(Datos)
+
+#Convertimos las variables categoricas en factor
+for (i in 1:ncol(Datos)){
+  if(i==3)
+    {}
+  else
+  {Datos[,i]<-as.factor(Datos[,i])}}
+```
+
+# Procedemos a realizar un EDA-Exploratory Data Analysis
+
+```{r}
+library(skimr)
+skim(Datos)
+str(Datos)
+```
+
+Análisis de las variables respuesta:
+
+- Grado de confianza en el presidente del Gobierno central: Pedro Sánchez.
+```{r}
+ggplot(data = Datos) +
+  geom_bar(mapping = aes(x = CONFIANZAPTE), fill = "brown1", colour = "black") +
+  scale_x_discrete(expand = c(0,0), labels =c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C."))+
+  ggtitle("Grado de confianza en el presidente del Gobierno central")
+
+```
+
+
+- Grado de confianza en el líder del principal partido de la oposición (PP): Pablo Casado.
+```{r}
+ggplot(data = Datos) +
+  geom_bar(mapping = aes(x = CONFIANZAOPOSIC), fill = "steelblue", colour = "black") +
+  scale_x_discrete(expand = c(0,0), labels =c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C."))+
+  ggtitle("Grado de confianza en el líder de la oposición (PP):")
+```
+
+# Tablas de Contingencia
+## 1) Confianza  vs P5
+
+P5: Se ha vacunado o no de coronavirus.
+```{r}
+attach(Datos)
+tabla1<-table(CONFIANZAPTE,P5)
+rownames(tabla1)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla1)<-c("1.- Sí, ya me he vacunado","2.- No, aún no me he vacunado","9.- N.C.")
+knitr::kable(tabla1)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest1<-chisq.test(tabla1, simulate.p.value = T))
+if(chitest1$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest1$statistic," y el p-valor ha sido:",round(chitest1$p.value,3))}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla1))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla1))
+
+
+# Confianza Oposición vs P5
+attach(Datos)
+tabla2<-table(CONFIANZAOPOSIC,P5)
+rownames(tabla2)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla2)<-c("1.- Sí, ya me he vacunado","2.- No, aún no me he vacunado","9.- N.C.")
+knitr::kable(tabla2)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest2<-chisq.test(tabla2, simulate.p.value = T))
+if(chitest2$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest2$statistic," y el p-valor ha sido:",round(chitest2$p.value,3))}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla2))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla2))
+
+
+tabla1<-as.data.frame(tabla1)
+tabla2<-as.data.frame(tabla2)
+```
+
+ 
+Graficos
+```{r}
+library(gridExtra)
+p1<-ggplot(tabla1, aes(x=CONFIANZAPTE, y=P5))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Sí, ya me he vacunado","2.- No, aún no me he vacunado","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Se ha vacunado o no de coronavirus.", 
+       fill = "Answer \n") 
+
+p2<-ggplot(tabla2, aes(x=CONFIANZAOPOSIC, y=P5))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Sí, ya me he vacunado","2.- No, aún no me he vacunado","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "Se ha vacunado o no de coronavirus.", 
+       fill = "Answer \n")
+
+p1
+p2
+grid.arrange(p1,p2)
+```
+
+
+## 2) Confianza vs P1
+
+P1: Grado de preocupación ante la situación del coronavirus COVID-19
+
+```{r}
+attach(Datos)
+tabla3<-table(CONFIANZAPTE,P1)
+rownames(tabla3)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla3)<-c("1.- Mucho","2.- Bastante","3.- Regular","4.- Poco","5.- Nada","8.- N.S.","9.- N.C.")
+knitr::kable(tabla3)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest3<-chisq.test(tabla3, simulate.p.value = T))
+if(chitest3$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest3$statistic," y el p-valor ha sido:",chitest3$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla3))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla3))
+
+# Confianza Oposición vs P1
+attach(Datos)
+tabla4<-table(CONFIANZAOPOSIC,P1)
+rownames(tabla4)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla4)<-c("1.- Mucho","2.- Bastante","3.- Regular","4.- Poco","5.- Nada","8.- N.S.","9.- N.C.")
+knitr::kable(tabla4)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest4<-chisq.test(tabla4, simulate.p.value = T))
+if(chitest4$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest4$statistic," y el p-valor ha sido:",chitest4$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla4))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla4))
+
+
+tabla3<-as.data.frame(tabla3)
+tabla4<-as.data.frame(tabla4)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p3<-ggplot(tabla3, aes(x=CONFIANZAPTE, y=P1))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Mucho","2.- Bastante","3.- Regular","4.- Poco","5.- Nada","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Grado de preocupación ante la situación del coronavirus COVID-19.", 
+       title = "Número de Personas basado en su confiaza en el Presidente y si están vacunados. \n",
+       fill = "Answer \n") 
+
+p4<-ggplot(tabla4, aes(x=CONFIANZAOPOSIC, y=P1))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Mucho","2.- Bastante","3.- Regular","4.- Poco","5.- Nada","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "SP1: Grado de preocupación ante la situación del coronavirus COVID-19.", 
+       title = "Número de Personas basado en su confiaza en el Presidente y si están vacunados. \n",
+       fill = "Answer \n")
+
+p3
+p4
+grid.arrange(p3,p4)
+```
+
+## 3) Confianza VS P2
+
+P2: Efectos de la crisis de COVID-19 que más preocupan personalmente.
+    
+```{r}
+attach(Datos)
+tabla5<-table(CONFIANZAPTE,P2)
+rownames(tabla5)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla5)<-c("1.- Los efectos sobre la salud","2.- Los efectos sobre la economía y el empleo","3.- Ambos por igual","4.- Ni unos ni otros","8.- N.S.","9.- N.C.")
+knitr::kable(tabla5)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest5<-chisq.test(tabla5, simulate.p.value = T))
+if(chitest5$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest5$statistic," y el p-valor ha sido:",chitest5$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla5))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla5))
+
+# Confianza Oposición vs P2
+attach(Datos)
+tabla6<-table(CONFIANZAOPOSIC,P2)
+rownames(tabla6)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla6)<-c("1.- Los efectos sobre la salud","2.- Los efectos sobre la economía y el empleo","3.- Ambos por igual","4.- Ni unos ni otros","8.- N.S.","9.- N.C.")
+knitr::kable(tabla6)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest6<-chisq.test(tabla6, simulate.p.value = T))
+if(chitest6$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest6$statistic," y el p-valor ha sido:",chitest6$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla6))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla6))
+
+
+tabla5<-as.data.frame(tabla5)
+tabla6<-as.data.frame(tabla6)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p5<-ggplot(tabla5, aes(x=CONFIANZAPTE, y=P2))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Los efectos sobre la salud","2.- Los efectos sobre la economía y el empleo","3.- Ambos por igual","4.- Ni unos ni otros","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Efectos de la crisis de COVID-19 que más preocupan personalmente.", 
+       title = ". \n",
+       fill = "Answer \n") 
+
+p6<-ggplot(tabla6, aes(x=CONFIANZAOPOSIC, y=P2))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Los efectos sobre la salud","2.- Los efectos sobre la economía y el empleo","3.- Ambos por igual","4.- Ni unos ni otros","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "SP2: Efectos de la crisis de COVID-19 que más preocupan personalmente.", 
+       title = ". \n",
+       fill = "Answer \n")
+
+grid.arrange(p5,p6)
+```
+
+## 4) Confianza VS P3
+
+P3: Opinión sobre si habría que tomar medidas de control y aislamiento más exigentes o continuar como en la actualidad
+
+```{r}
+attach(Datos)
+tabla7<-table(CONFIANZAPTE,P3)
+rownames(tabla7)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla7)<-c("1.- Hay que tomar medidas más exigentes","2.- Podemos continuar como estamos","3.- Se podrían ir relajando las medidas en vista de la evolución de la pandemia","8.- N.S.","9.- N.C.")
+knitr::kable(tabla7)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest7<-chisq.test(tabla7, simulate.p.value = T))
+if(chitest7$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest7$statistic," y el p-valor ha sido:",chitest7$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla7))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla7))
+
+# Confianza Oposición vs P3
+attach(Datos)
+tabla8<-table(CONFIANZAOPOSIC,P3)
+rownames(tabla8)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla8)<-c("1.- Hay que tomar medidas más exigentes","2.- Podemos continuar como estamos","3.- Se podrían ir relajando las medidas en vista de la evolución de la pandemia","8.- N.S.","9.- N.C.")
+knitr::kable(tabla8)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest8<-chisq.test(tabla8, simulate.p.value = T))
+if(chitest8$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest8$statistic," y el p-valor ha sido:",chitest8$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla8))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla8))
+
+
+tabla7<-as.data.frame(tabla7)
+tabla8<-as.data.frame(tabla8)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p7<-ggplot(tabla7, aes(x=CONFIANZAPTE, y=P3))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Hay que tomar medidas más exigentes","2.- Podemos continuar como estamos","3.- Se podrían ir relajando...","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  theme(axis.text = element_text(size = 8)) +
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Opinión sobre si habría que tomar medidas de control y aislamiento más exigentes o continuar como en la actualidad.", 
+       title = ". \n",
+       fill = "Answer \n") 
+
+p8<-ggplot(tabla8, aes(x=CONFIANZAOPOSIC, y=P3))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Hay que tomar medidas más exigentes","2.- Podemos continuar como estamos","3.- Se podrían ir relajando...","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  theme(axis.text = element_text(size = 8)) +
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "SP3: Opinión sobre si habría que tomar medidas de control y aislamiento más exigentes o continuar como en la actualidade.", 
+       title = ". \n",
+       fill = "Answer \n")
+
+grid.arrange(p7,p8)
+```
+## 5) Confianza VS P4
+
+P4: Valoración sobre si ha pasado o peor o no de la situación sanitaria generada por el coronavirus.
+
+```{r}
+attach(Datos)
+tabla9<-table(CONFIANZAPTE,P4)
+rownames(tabla9)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla9)<-c("1.- Lo peor ha pasado ya","2.- Seguimos en el peor momento","3.- Lo peor está por llegar","8.- No lo sabe, duda","9.- N.C.")
+knitr::kable(tabla9)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest9<-chisq.test(tabla9, simulate.p.value = T))
+if(chitest9$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest9$statistic," y el p-valor ha sido:",chitest9$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla9))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla9))
+
+# Confianza Oposición vs P4
+attach(Datos)
+tabla10<-table(CONFIANZAOPOSIC,P4)
+rownames(tabla10)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla10)<-c("1.- Lo peor ha pasado ya","2.- Seguimos en el peor momento","3.- Lo peor está por llegar","8.- No lo sabe, duda","9.- N.C.")
+knitr::kable(tabla10)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest10<-chisq.test(tabla10, simulate.p.value = T))
+if(chitest10$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest10$statistic," y el p-valor ha sido:",chitest10$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla10))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla10))
+
+
+tabla9<-as.data.frame(tabla9)
+tabla10<-as.data.frame(tabla10)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p9<-ggplot(tabla9, aes(x=CONFIANZAPTE, y=P4))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Lo peor ha pasado ya","2.- Seguimos en el peor momento","3.- Lo peor está por llegar","8.- No lo sabe, duda","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Valoración sobre si ha pasado o peor o no de la situación sanitaria generada por el coronavirus.", 
+       title = ". \n",
+       fill = "Answer \n") 
+
+p10<-ggplot(tabla10, aes(x=CONFIANZAOPOSIC, y=P4))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Lo peor ha pasado ya","2.- Seguimos en el peor momento","3.- Lo peor está por llegar","8.- No lo sabe, duda","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "SP4: Valoración sobre si ha pasado o peor o no de la situación sanitaria generada por el coronavirus.", 
+       title = ". \n",
+       fill = "Answer \n")
+
+grid.arrange(p9,p10)
+```
+## 6) Confianza VS P6
+
+P6: Obligatoriedad de vacunación para todas las personas.
+
+```{r}
+attach(Datos)
+tabla11<-table(CONFIANZAPTE,P6)
+rownames(tabla11)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla11)<-c("1.- Sí, habría que obligar a todos y a todas a vacunarse","2.- No, no habría que obligar a nadie a vacunarse","3.- Depende de los casos","8.- No sabe. Duda","9.- N.C.")
+knitr::kable(tabla11)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest11<-chisq.test(tabla11, simulate.p.value = T))
+if(chitest11$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest11$statistic," y el p-valor ha sido:",chitest11$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla11))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla11))
+
+# Confianza Oposición vs P6
+attach(Datos)
+tabla12<-table(CONFIANZAOPOSIC,P6)
+rownames(tabla12)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla12)<-c("1.- Sí, habría que obligar a todos y a todas a vacunarse","2.- No, no habría que obligar a nadie a vacunarse","3.- Depende de los casos","8.- No sabe. Duda","9.- N.C.")
+knitr::kable(tabla12)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest12<-chisq.test(tabla12, simulate.p.value = T))
+if(chitest12$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest12$statistic," y el p-valor ha sido:",chitest12$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla12))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla12))
+
+
+tabla11<-as.data.frame(tabla11)
+tabla12<-as.data.frame(tabla12)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p11<-ggplot(tabla11, aes(x=CONFIANZAPTE, y=P6))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Sí, habría que obligar a todos y a todas a vacunarse","2.- No, no habría que obligar a nadie a vacunarse","3.- Depende de los casos","8.- No sabe. Duda","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() +
+   theme(axis.text = element_text(size = 7)) +
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Obligatoriedad de vacunación para todas las personas.", 
+       title = ". \n",
+       fill = "Answer \n") 
+
+p12<-ggplot(tabla12, aes(x=CONFIANZAOPOSIC, y=P6))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Sí, habría que obligar a todos y a todas a vacunarse","2.- No, no habría que obligar a nadie a vacunarse","3.- Depende de los casos","8.- No sabe. Duda","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+   theme(axis.text = element_text(size = 7)) +
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "SP6:Obligatoriedad de vacunación para todas las personas.", 
+       title = ". \n",
+       fill = "Answer \n")
+
+grid.arrange(p11,p12)
+```
+
+
+## 7) Confianza VS P7
+
+P7: Obligatoriedad de vacunación para el personal sanitario, sociosanitario y con relación profesional directa con el público en general.
+
+
+```{r}
+attach(Datos)
+tabla13<-table(CONFIANZAPTE,P7)
+rownames(tabla13)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla13)<-c("1.- Sí","2.- No","8.- No sabe. Duda","9.- N.C.","0.- N.P.")
+knitr::kable(tabla13)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest13<-chisq.test(tabla13, simulate.p.value = T))
+if(chitest13$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest13$statistic," y el p-valor ha sido:",chitest13$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla13))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla13))
+
+# Confianza Oposición vs P7
+attach(Datos)
+tabla14<-table(CONFIANZAOPOSIC,P7)
+rownames(tabla14)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla14)<-c("1.- Sí","2.- No","8.- No sabe. Duda","9.- N.C.","0.- N.P.")
+knitr::kable(tabla14)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest14<-chisq.test(tabla14, simulate.p.value = T))
+if(chitest14$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest14$statistic," y el p-valor ha sido:",chitest14$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla14))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla14))
+
+
+tabla13<-as.data.frame(tabla13)
+tabla14<-as.data.frame(tabla14)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p13<-ggplot(tabla13, aes(x=CONFIANZAPTE, y=P7))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Sí","2.- No","8.- No sabe. Duda","9.- N.C.","0.- N.P.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Obligatoriedad de vacunación para el personal sanitario, sociosanitario y con relación profesional directa con el público en general.", 
+       title = ". \n",
+       fill = "Answer \n") 
+
+p14<-ggplot(tabla14, aes(x=CONFIANZAOPOSIC, y=P7))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 6) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Sí","2.- No","8.- No sabe. Duda","9.- N.C.","0.- N.P.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "SP7:Obligatoriedad de vacunación para el personal sanitario, sociosanitario y con relación profesional directa con el público en general.", 
+       title = ". \n",
+       fill = "Answer \n")
+
+grid.arrange(p13,p14)
+```
+
+## 8) Confianza VS ECOESP
+
+ECOESP: Valoración de la situación económica general de España.
+
+```{r}
+attach(Datos)
+tabla15<-table(CONFIANZAPTE,ECOESP)
+rownames(tabla15)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla15)<-c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")
+knitr::kable(tabla15)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest15<-chisq.test(tabla15, simulate.p.value = T))
+if(chitest15$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest15$statistic," y el p-valor ha sido:",chitest15$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla15))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla15))
+
+# Confianza Oposición vs ECOESP
+attach(Datos)
+tabla16<-table(CONFIANZAOPOSIC,ECOESP)
+rownames(tabla16)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla16)<-c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")
+knitr::kable(tabla16)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest16<-chisq.test(tabla16, simulate.p.value = T))
+if(chitest16$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest16$statistic," y el p-valor ha sido:",chitest16$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla16))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla16))
+
+
+tabla15<-as.data.frame(tabla15)
+tabla16<-as.data.frame(tabla16)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p15<-ggplot(tabla15, aes(x=CONFIANZAPTE, y=ECOESP))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 4) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Valoración de la situación económica general de España.", 
+       title = ". \n",
+       fill = "Answer \n") 
+
+p16<-ggplot(tabla16, aes(x=CONFIANZAOPOSIC, y=ECOESP))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 4) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "ECOESP:Valoración de la situación económica general de España.", 
+       title = ". \n",
+       fill = "Answer \n")
+
+grid.arrange(p15,p16)
+```
+
+## 9) Confianza VS ECOPER
+
+ECOPER: Valoración de la situación económica personal actual.
+
+```{r}
+attach(Datos)
+tabla17<-table(CONFIANZAPTE,ECOPER)
+rownames(tabla17)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla17)<-c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")
+knitr::kable(tabla17)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest17<-chisq.test(tabla17, simulate.p.value = T))
+if(chitest17$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest17$statistic," y el p-valor ha sido:",chitest17$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla17))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+
+# análisis de correspondencia tabla 1
+library(ca)
+plot(ca(tabla17))
+
+# Confianza Oposición vs ECOPER
+attach(Datos)
+tabla18<-table(CONFIANZAOPOSIC,ECOPER)
+rownames(tabla18)<-c("1.- Mucha confianza","2.- Bastante confianza","3.- Poca confianza","4.- Ninguna confianza","8.- N.S.","9.- N.C.")
+colnames(tabla18)<-c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")
+knitr::kable(tabla18)
+
+# análisis de independencia
+cat("Análisis de independencia de las variables:\n")
+(chitest18<-chisq.test(tabla18, simulate.p.value = T))
+if(chitest18$p.value<0.05){cat("Las variables presentan algún grado de asociación o dependencia. El estadístico usado ha sido:",chitest18$statistic," y el p-valor ha sido:",chitest18$p.value)}else{cat("No hay suficiente información en contra de la hipótesis nula, las variables son independientes")}
+
+#Medidas de asociacion (V de Cramer)
+cat("\n","Medidas de asociacion:\n")
+library(vcd)
+(asociacion<-assocstats(tabla18))
+
+if(asociacion$cramer<0.2){
+  cat("El resultado es débil, aunque el resultado es estadisticamente sinificativo, los campos solo estan debilmente asociados.")
+}else{
+  if(asociacion$cramer>0.6){
+    cat("El resultado es fuerte y los campos están fuertemente asociados.")
+  }
+  cat("El resultado es moderado, los campo están asociados moderadamente.")
+}
+
+
+# análisis de correspondencia tabla 2
+library(ca)
+plot(ca(tabla18))
+
+
+tabla17<-as.data.frame(tabla17)
+tabla18<-as.data.frame(tabla18)
+```
+
+ 
+Gráficos
+```{r}
+library(gridExtra)
+p17<-ggplot(tabla17, aes(x=CONFIANZAPTE, y=ECOPER))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 4) +
+  scale_x_discrete(expand = c(0,0), labels =c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels =c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "red") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el Presidente del Gobierno central: Pedro Sánchez.", y = "Valoración de la situación económica personal actual.", 
+       title = ". \n",
+       fill = "Answer \n") 
+
+p18<-ggplot(tabla18, aes(x=CONFIANZAOPOSIC, y=ECOPER))+
+  geom_tile(aes(fill = Freq)) +
+  geom_text(aes(label = Freq), color = "black", fontface = "bold", size = 4) +
+  scale_x_discrete(expand = c(0,0), labels = c("1. Mucha","2. Bastante","3. Poca","4. Ninguna","8. N.S."," 9.N.C."))+
+  scale_y_discrete(expand = c(0,0), labels = c("1.- Muy buena","2.- Buena","3.- Regular","4.- Mala","5.- Muy mala","8.- N.S.","9.- N.C.")) +
+  scale_fill_gradient("Leyenda de conteo \n", low = "white", high = "blue") +
+  theme_bw() + 
+  labs(x = "\n Confianza en el líder del principal partido de la oposición (PP): Pablo Casado.", y = "ECOPER:Valoración de la situación económica personal actual.", 
+       title = ". \n",
+       fill = "Answer \n")
+
+grid.arrange(p17,p18)
+```
+
+
+
+# Creación de los modelos
+## Modelo 1: Para el grado de confianza en el Presidente del Gobierno Pedro Sanchez tick
+
+OLR - ORDINAL LOGISTIC REGRESSION VIA Backwards Stepwise AIC Criteria
+
+Obtenemos el modelo mediante el método de machine learning stepback:
+```{r}
+# Definimos los datos
+Datos1<-Datos[,-14]
+
+# Separamos en entrenamiento y test
+set.seed(0)
+indice<-sample(1:nrow(Datos1), nrow(Datos1)*0.7, replace = F)
+
+Datos1_train<-Datos1[indice,]
+Datos1_test<-Datos1[-indice,]
+
+# Construimos el modelo completo 
+full.model.1<-polr(CONFIANZAPTE~., data = Datos1_train, Hess = T)
+```
+
+Aplicamos el algoritmo de stepwise:
+```{r}
+modback1<-stepAIC(full.model.1,trace = T,direction = "backward")
+```
+
+
+```{r}
+#Obtenemos resumen del proceso:
+modback1$anova
+```
+
+
+```{r}
+# Tabla de resultados del modelo 
+summary(modback1)
+```
+
+## estudio del modelo 1
+```{r}
+# cargar librarias
+require(MASS)
+
+modelofinal1<-polr(CONFIANZAPTE ~ CCAA + SEXO + P1 + P2 + P3 + P4 + P5 + ECOESP + ECOPER, data = Datos1_train, Hess = T)
+
+# La funcion stargazer permite guardar el modelo y abrirlo en word
+library(stargazer)
+stargazer(modelofinal1,type="text", out="modelofinal1.html")
+
+Anova(modelofinal1)
+```
+
+Podemos ver que aunque no todas las categorías de las variables tengan un p-valor menor a 0.05, todas las variables son todas siginificativa al 95% de confianza.
+
+```{r}
+# Getting coefficients and p-values
+m1.coef <- data.frame(coef(summary(modelofinal1)))
+
+m1.coef$pval <- round((pnorm(abs(m1.coef$t.value), lower.tail = FALSE) * 2),2)
+
+m1.coef
+```
+
+Ratios de riesgo relativo permiten una interpretación más sencilla de los coeficientes logit. Son el valor exponencial de los coeficientes logit
+```{r}
+# confidence intervals
+ci <- confint(modelofinal1)
+
+m1.OddsRatio<-exp(coef(modelofinal1))
+sort(m1.OddsRatio)
+
+round(cbind(m1.OddsRatio,exp(ci)),4)
+
+library(stargazer)
+stargazer(modelofinal1, type="text", coef=list(m1.OddsRatio), p.auto=FALSE, out="m1or.htm")
+```
+
+
+## predicciones con el modelo 1
+```{r}
+probabilities<-predict(modelofinal1, newdata = Datos1_test, type = "prob")
+# matriz de confusion
+predic.test<-predict(modelofinal1, Datos1_test, type="class")
+summary(predic.test)
+library(caret)
+confusionMatrix(as.factor(predic.test),Datos1_test$CONFIANZAPTE)
+```
+
+# Modelo 2: Para el grado de confianza en el Líder de la oposicon Pablo Casado
+OLR - ORDINAL LOGISTIC REGRESSION VIA Backwards Stepwise AIC Criteria
+
+Obtenemos el modelo mediante el método de machine learning stepback:
+```{r}
+# Definimos los datos
+Datos2<-Datos[,-c(8,13)]
+
+# Separamos en entrenamiento y test
+set.seed(0)
+indice<-sample(1:nrow(Datos2), nrow(Datos2)*0.7, replace = F)
+
+Datos2_train<-Datos2[indice,]
+Datos2_test<-Datos2[-indice,]
+
+# Construimos el modelo completo 
+full.model.2<-polr(CONFIANZAOPOSIC~., data = Datos2, Hess = T)
+```
+
+
+```{r}
+modback2<-stepAIC(full.model.2,trace = T,direction = "backward")
+```
+
+
+```{r}
+#Obtenemos resumen del proceso:
+modback2$anova
+```
+
+
+```{r}
+# Tabla de resultados del modelo 
+summary(modback2)
+```
+
+## estudio del modelo 2
+```{r}
+# cargar librarias
+require(MASS)
+
+modelofinal2<-polr(CONFIANZAOPOSIC ~ CCAA + SEXO + P2 + P7 + ECOESP + ECOPER, data = Datos2, Hess = T)
+
+# La funcion stargazer permite guardar el modelo y abrirlo en word
+library(stargazer)
+stargazer(modelofinal2,type="text", out="modelofinal2.html")
+
+Anova(modelofinal2)
+```
+Podemos ver que todas las variables son todas siginificativa al 95% de confianza.
+
+```{r}
+# Getting coefficients and p-values
+m2.coef <- data.frame(coef(summary(modelofinal1)))
+
+m2.coef$pval <- round((pnorm(abs(m2.coef$t.value), lower.tail = FALSE) * 2),2)
+
+m2.coef
+```
+
+Ratios de riesgo relativo permiten una interpretación más sencilla de los coeficientes logit. Son el valor exponencial de los coeficientes logit
+```{r}
+# confidence intervals
+ci <- confint(modelofinal2)
+
+m2.OddsRatio<-exp(coef(modelofinal2))
+
+round(cbind(m2.OddsRatio,exp(ci)),4)
+
+library(stargazer)
+stargazer(modelofinal2, type="text", coef=list(m2.OddsRatio), p.auto=FALSE, out="m1or.htm")
+```
+## predicciones del modleo 2
+```{r}
+# matriz de confusion
+predic2.test<-predict(modelofinal2, Datos2_test, type="class")
+summary(predic2.test)
+library(caret)
+confusionMatrix(as.factor(predic2.test),Datos2_test$CONFIANZAOPOSIC)
+```
+
+
